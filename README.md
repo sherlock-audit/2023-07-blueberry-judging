@@ -1,4 +1,201 @@
-# Issue H-1: CurveTricryptoOracle#getPrice contains math error that causes LP to be priced completely wrong 
+# Issue H-1: Stable BPT valuation is incorrect and can be exploited to cause protocol insolvency 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/97 
+
+## Found by 
+0x52
+
+The current methodology for valuing Stable BPT is incorrect and can lead to significant over valuation of the stable BPT.
+
+## Vulnerability Detail
+
+[StableBPTOracle.sol#L48-L53](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/oracle/StableBPTOracle.sol#L48-L53)
+
+        uint256 minPrice = base.getPrice(tokens[0]);
+        for(uint256 i = 1; i != length; ++i) {
+            uint256 price = base.getPrice(tokens[i]);
+            minPrice = (price < minPrice) ? price : minPrice;
+        }
+        return minPrice.mulWadDown(pool.getRate());
+
+The above block is used to calculate the price. Finding the min price of all assets in the pool then multiplying by the current rate of the pool. This is nearly identical to how stable curve LP is priced. Balancer pools are a bit different and this methodology is incorrect for them. Lets look at a current mainnet pool to see the problem. Take the wstETH/aETHc pool. Currently getRate() = 1.006. The lowest price is aETHc at 2,073.23. This values the LP at 2,085.66. The issue is that the LPs actual value is 1,870.67 (nearly 12% overvalued) which can be checked [here](https://app.apy.vision/pools/balancerv2_eth-wstETH-ankrETH-0xdfe6e7e18f6cc65fa13c8d8966013d4fda74b6ba).
+
+Overvaluing the LP as such can cause protocol insolvency as the borrower can overborrow against the LP, leaving the protocol with bad debt.
+
+## Impact
+
+Protocol insolvency due to overborrowing
+
+## Code Snippet
+
+https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/oracle/StableBPTOracle.sol#L37-L54
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Stable BPT oracles need to use a new pricing methodology
+
+
+
+
+## Discussion
+
+**sherlock-admin2**
+
+2 comment(s) were left on this issue during the judging contest.
+
+**0xyPhilic** commented:
+> invalid because there is no sufficient data/explanations to support the explained issue
+
+**Kral01** commented:
+> only an issue if the protocol uses this LP pair
+
+
+
+**IAm0x52**
+
+Escalate
+
+This is not a dupe of #100. Though it focuses on a similar area of the code, the underlying issue is completely different. StableBPT is value highly incorrectly for some pools and it will cause significant damage to the protocol.
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This is not a dupe of #100. Though it focuses on a similar area of the code, the underlying issue is completely different. StableBPT is value highly incorrectly for some pools and it will cause significant damage to the protocol.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+> ing the LP as such can cause protocol insolvency as the borrower can overborrow against the LP, leaving the protocol with bad debt.
+
+Yes, not a duplicate of #100 
+@Gornutz can you take a look at this?
+
+**Gornutz**
+
+Confirm this is not a duplicate of #100  
+
+**hrishibhat**
+
+Result:
+High 
+Unique
+Considering this a valid high issue as the wrong price is calculated and returned
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/97/#issuecomment-1694746948): accepted
+
+# Issue H-2: CurveTricryptoOracle incorrectly assumes that WETH is always the last token in the pool which leads to bad LP pricing 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/98 
+
+## Found by 
+0x52, Vagner
+
+CurveTricryptoOracle assumes that WETH is always the last token in the pool (`tokens[2]`). This is incorrect for a majority of tricrypto pools and will lead to LP being highly overvalued.
+
+## Vulnerability Detail
+
+[CurveTricryptoOracle.sol#L53-L63](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/oracle/CurveTricryptoOracle.sol#L53-L63)
+
+        if (tokens.length == 3) {
+            /// tokens[2] is WETH
+            uint256 ethPrice = base.getPrice(tokens[2]);
+            return
+                (lpPrice(
+                    virtualPrice,
+                    base.getPrice(tokens[1]),
+                    ethPrice,
+                    base.getPrice(tokens[0])
+                ) * 1e18) / ethPrice;
+        }
+
+When calculating LP prices, CurveTricryptoOracle#getPrice always assumes that WETH is the second token in the pool. This isn't the case which will cause the LP to be massively overvalued.
+
+There are 6 tricrypto pools currently deployed on mainnet. Half of these pools have an asset other than WETH as token[2]:
+
+        0x4ebdf703948ddcea3b11f675b4d1fba9d2414a14 - CRV
+        0x5426178799ee0a0181a89b4f57efddfab49941ec - INV
+        0x2889302a794da87fbf1d6db415c1492194663d13 - wstETH
+
+## Impact
+
+LP will be massively overvalued leading to overborrowing and protocol insolvency
+
+## Code Snippet
+
+[CurveTricryptoOracle.sol#L48-L65](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/oracle/CurveTricryptoOracle.sol#L48-L65)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+There is no need to assume that WETH is the last token. Simply pull the price for each asset and input it into lpPrice.
+
+
+
+
+
+## Discussion
+
+**IAm0x52**
+
+Escalate
+
+This is not a dupe of #105. This will cause a large number of tricrypto pools to be overvalued which presents a serious risk to the protocol.
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This is not a dupe of #105. This will cause a large number of tricrypto pools to be overvalued which presents a serious risk to the protocol.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+Agree. 
+This is not a duplicate of #105 
+This can become its own main report and #20 is a duplicate of it.
+
+There were some issues with (de)duplication. I would resolve like this.
+#98 is the duplicate with #20 
+#105 is duplicate with #42 
+
+**hrishibhat**
+
+Result:
+High 
+Has duplicates
+This is a valid high issue based on the description
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/98/#issuecomment-1694746548): accepted
+
+# Issue H-3: CurveTricryptoOracle#getPrice contains math error that causes LP to be priced completely wrong 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/100 
 
@@ -69,6 +266,372 @@ This is valid. The code being used here was borrowed from the Sentiment [CurveTr
 > This is valid. The code being used here was borrowed from the Sentiment [CurveTriCryptoOracle](https://arbiscan.io/address/0x4e828a117ddc3e4dd919b46c90d4e04678a05504#code), which is specifically meant to return the price in terms of ETH. This oracle is meant to return the valuation in USD which means the division by the price of ETH needs to be dropped.
 
 Maybe was a bit quick in closing. Will reopen it and we will take a deeper look at it.
+
+# Issue H-4: CVX/AURA distribution calculation is incorrect and will lead to loss of rewards at the end of each cliff 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/109 
+
+## Found by 
+0x52
+
+When calculating the amount of pending AURA owed to a user _getAuraPendingReward uses the current values for supply. This leads to incorrect calculation across cliffs which leads to loss of rewards for users.
+
+## Vulnerability Detail
+
+[WAuraPools.sol#L233-L248](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/wrapper/WAuraPools.sol#L233-L248)
+
+        if (cliff < totalCliffs) {
+            /// e.g. (new) reduction = (500 - 100) * 2.5 + 700 = 1700;
+            /// e.g. (new) reduction = (500 - 250) * 2.5 + 700 = 1325;
+            /// e.g. (new) reduction = (500 - 400) * 2.5 + 700 = 950;
+            uint256 reduction = ((totalCliffs - cliff) * 5) / 2 + 700;
+            /// e.g. (new) amount = 1e19 * 1700 / 500 =  34e18;
+            /// e.g. (new) amount = 1e19 * 1325 / 500 =  26.5e18;
+            /// e.g. (new) amount = 1e19 * 950 / 500  =  19e17;
+            mintAmount = (mintRequestAmount * reduction) / totalCliffs;
+
+            /// e.g. amtTillMax = 5e25 - 1e25 = 4e25
+            uint256 amtTillMax = emissionMaxSupply - emissionsMinted;
+            if (mintAmount > amtTillMax) {
+                mintAmount = amtTillMax;
+            }
+        }
+
+The above code is used to calculate the amount of AURA owed to the user. This calculation is perfectly accurate if the AURA hasn't been minted yet. The problem is that each time a user withdraws, AURA is claimed for ALL vault participants. This means that the rewards will be realized for a majority of users before they themselves withdraw. Since the emissions decrease with each cliff, there will be loss of funds at the end of each cliff.
+
+Example:
+Assume for simplicity there are only 2 cliffs. User A deposits LP to WAuraPools. After some time User B deposits as well. Before the end of the first cliff User A withdraw. This claims all tokens owed to both users A and B which is now sitting in the contract. Assume both users are owed 10 tokens. Now User B waits for the second cliff to end before withdrawing. When calculating his rewards it will give him no rewards since all cliffs have ended. The issue is that the 10 tokens they are owed is already sitting in the contract waiting to be claimed.
+
+## Impact
+
+All users will lose rewards at the end of each cliff due to miscalculation
+
+## Code Snippet
+
+[WAuraPools.sol#L209-L249](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/wrapper/WAuraPools.sol#L209-L249)
+
+[WConvexPools.sol#L149-L172](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/wrapper/WConvexPools.sol#L149-L172)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+I would recommend a hybrid approach. When rewards are claimed upon withdrawal, the reward per token should be cached to prevent loss of tokens that have already been received by the contract. Only unminted AURA should be handled this way.
+
+
+
+## Discussion
+
+**IAm0x52**
+
+Escalate
+
+This was wrongly excluded and causes a significant problem. Whenever a position is burned it calls the following line:
+
+https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/wrapper/WAuraPools.sol#L379
+
+        IAuraRewarder(auraRewarder).withdraw(amount, true);
+
+Which withdraws the LP and claims rewards because of the `true` input. Digging into the rewarder contract:
+
+https://etherscan.io/address/0x1204f5060be8b716f5a62b4df4ce32acd01a69f5#code#F18#L229
+
+    function withdraw(uint256 amount, bool claim)
+        public
+        updateReward(msg.sender)
+        returns(bool)
+    {
+        require(amount > 0, 'RewardPool : Cannot withdraw 0');
+
+        //also withdraw from linked rewards
+        for(uint i=0; i < extraRewards.length; i++){
+            IRewards(extraRewards[i]).withdraw(msg.sender, amount);
+        }
+
+        _totalSupply = _totalSupply.sub(amount);
+        _balances[msg.sender] = _balances[msg.sender].sub(amount);
+
+        stakingToken.safeTransfer(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
+     
+        if(claim){
+            getReward(msg.sender,true);
+        }
+
+        emit Transfer(msg.sender, address(0), amount);
+
+        return true;
+    }
+
+Here we see that if claim == true then we call `getReward`
+
+https://etherscan.io/address/0x1204f5060be8b716f5a62b4df4ce32acd01a69f5#code#F18#L296
+
+    function getReward(address _account, bool _claimExtras) public updateReward(_account) returns(bool){
+        uint256 reward = earned(_account);
+        if (reward > 0) {
+            rewards[_account] = 0;
+            rewardToken.safeTransfer(_account, reward);
+            IDeposit(operator).rewardClaimed(pid, _account, reward);
+            emit RewardPaid(_account, reward);
+        }
+
+        //also get rewards from linked rewards
+        if(_claimExtras){
+            for(uint i=0; i < extraRewards.length; i++){
+                IRewards(extraRewards[i]).getReward(_account);
+            }
+        }
+        return true;
+    }
+
+Here we see that the ENTIRE reward balance is claimed for the vault. This presents the problem as outlined in my issue above. Let's assume that the reward for the current round is 1:1 (i.e. that each claimed BAL gives 1 AURA). Assume we have 2 users, each with half the pool. Now 100 tokens are claimed in this round, which means each user is owed 50 AURA. After some amount of rounds, the reward is now 1:0.5 (i.e. that each claimed BAL gives 1 AURA). Now when user A withdraws instead of being paid 100 AURA for that round they will instead only be paid 50 AURA and they will lose the other 50 since it won't be claimable. This is because it always uses the most recent exchange rate instead of the rate at which it was claimed.
+
+
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This was wrongly excluded and causes a significant problem. Whenever a position is burned it calls the following line:
+> 
+> https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/wrapper/WAuraPools.sol#L379
+> 
+>         IAuraRewarder(auraRewarder).withdraw(amount, true);
+> 
+> Which withdraws the LP and claims rewards because of the `true` input. Digging into the rewarder contract:
+> 
+> https://etherscan.io/address/0x1204f5060be8b716f5a62b4df4ce32acd01a69f5#code#F18#L229
+> 
+>     function withdraw(uint256 amount, bool claim)
+>         public
+>         updateReward(msg.sender)
+>         returns(bool)
+>     {
+>         require(amount > 0, 'RewardPool : Cannot withdraw 0');
+> 
+>         //also withdraw from linked rewards
+>         for(uint i=0; i < extraRewards.length; i++){
+>             IRewards(extraRewards[i]).withdraw(msg.sender, amount);
+>         }
+> 
+>         _totalSupply = _totalSupply.sub(amount);
+>         _balances[msg.sender] = _balances[msg.sender].sub(amount);
+> 
+>         stakingToken.safeTransfer(msg.sender, amount);
+>         emit Withdrawn(msg.sender, amount);
+>      
+>         if(claim){
+>             getReward(msg.sender,true);
+>         }
+> 
+>         emit Transfer(msg.sender, address(0), amount);
+> 
+>         return true;
+>     }
+> 
+> Here we see that if claim == true then we call `getReward`
+> 
+> https://etherscan.io/address/0x1204f5060be8b716f5a62b4df4ce32acd01a69f5#code#F18#L296
+> 
+>     function getReward(address _account, bool _claimExtras) public updateReward(_account) returns(bool){
+>         uint256 reward = earned(_account);
+>         if (reward > 0) {
+>             rewards[_account] = 0;
+>             rewardToken.safeTransfer(_account, reward);
+>             IDeposit(operator).rewardClaimed(pid, _account, reward);
+>             emit RewardPaid(_account, reward);
+>         }
+> 
+>         //also get rewards from linked rewards
+>         if(_claimExtras){
+>             for(uint i=0; i < extraRewards.length; i++){
+>                 IRewards(extraRewards[i]).getReward(_account);
+>             }
+>         }
+>         return true;
+>     }
+> 
+> Here we see that the ENTIRE reward balance is claimed for the vault. This presents the problem as outlined in my issue above. Let's assume that the reward for the current round is 1:1 (i.e. that each claimed BAL gives 1 AURA). Assume we have 2 users, each with half the pool. Now 100 tokens are claimed in this round, which means each user is owed 50 AURA. After some amount of rounds, the reward is now 1:0.5 (i.e. that each claimed BAL gives 1 AURA). Now when user A withdraws instead of being paid 100 AURA for that round they will instead only be paid 50 AURA and they will lose the other 50 since it won't be claimable. This is because it always uses the most recent exchange rate instead of the rate at which it was claimed.
+> 
+> 
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+@Gornutz What do you think about it? 
+I think it is a valid Medium.
+
+**Gornutz**
+
+Seems directionally correct and valid from the parts of the POC provided. 
+
+**IAm0x52**
+
+The current AURA APR for pools are high double digit to triple digit returns. Additionally AURA is distributed over [~8 years](https://docs.aura.finance/aura/usdaura/distribution) and there are [500 cliffs](https://etherscan.io/address/0xC0c293ce456fF0ED870ADd98a0828Dd4d2903DBF#code#F1#L25) over that period. This makes the average cliff ~6 days. Unless every single user withdraws and redeposits each 6 day period (which is prohibitively expensive due to gas costs) this loss cannot be avoided. Given the almost certainty of the loss and the substantial amount these users stand to lose due to the high APRs and leveraged nature of the system, I believe this should be high risk rather than medium.
+
+**hrishibhat**
+
+Result:
+High
+Unique 
+After further review considering this to be a high based on the comments above 
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/109/#issuecomment-1694743790): accepted
+
+# Issue H-5: wrong bToken's exchangeRateStored used for calculate ColleteralValue 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/117 
+
+## Found by 
+mert\_eren
+BlueBerryBank.sol calculate position's risk value with `getPositionRisk()` . This function used for is position can be liquadatable or not.
+```solidity
+    function getPositionRisk(uint256 positionId) public returns (uint256 risk) {
+        uint256 pv = getPositionValue(positionId);
+        uint256 ov = getDebtValue(positionId);
+        uint256 cv = getIsolatedCollateralValue(positionId);
+
+
+        if (
+            (cv == 0 && pv == 0 && ov == 0) || pv >= ov /// Closed position or Overcollateralized position
+        ) {
+            risk = 0;
+        } else if (cv == 0) {
+            /// Sth bad happened to isolated underlying token
+            risk = Constants.DENOMINATOR;
+        } else {
+            risk = ((ov - pv) * Constants.DENOMINATOR) / cv;
+        }
+    }
+```
+
+`getIsolatedColleteralValue()` calculate lended value in position.
+```solidity
+    function getIsolatedCollateralValue(
+        uint256 positionId
+    ) public override returns (uint256 icollValue) {
+        Position memory pos = positions[positionId];
+        /// NOTE: exchangeRateStored has 18 decimals.
+        uint256 underlyingAmount;
+        if (_isSoftVault(pos.underlyingToken)) {
+            underlyingAmount =
+                (ICErc20(banks[pos.debtToken].bToken).exchangeRateStored() *
+                    pos.underlyingVaultShare) /
+                Constants.PRICE_PRECISION;
+        } else {
+            underlyingAmount = pos.underlyingVaultShare;
+        }
+        icollValue = oracle.getTokenValue(
+            pos.underlyingToken,
+            underlyingAmount
+        );
+    }
+```
+For calculate total value it should calculate first `underlyingAmount`. Due to calculate this, it should first multiply `pos.underlyingVaultShare` with ```exchangeRateStored()``` of this token.Because when stored `underlyingVaultShare` in `lend` function, it not stored directly lended amount but the amount minted in softVault after this tokens lended to it. 
+```solidity
+    function lend(
+        address token,
+        uint256 amount
+    ) external override inExec poke(token) onlyWhitelistedToken(token) {
+        ...
+
+
+        if (_isSoftVault(token)) {
+            _ensureApprove(token, bank.softVault, amount);
+            pos.underlyingVaultShare += ISoftVault(bank.softVault).deposit(
+                amount
+            );
+        } else {
+            _ensureApprove(token, bank.hardVault, amount);
+            pos.underlyingVaultShare += IHardVault(bank.hardVault).deposit(
+                token,
+                amount
+            );
+        }
+
+```
+SoftVault's `deposit` function call `mint` function of blueBerry bToken (which work same as compound cToken).And return minted amount of bToken. bToken mintAmount is `amount/exchangeRateStored` . So when calculate `underlyingAmount` , `pos.UnderlyinVaultShare` must be multiplied with btoken of underlyingToken's `exchangeRateStored`. However as seen above of the `getIsolatedColleteralValue()` code snippet it multiply with `debtToken`'s bToken not `underlyingToken`'s. Due to all bTokens' has different `exchangeRate`, `underlyingAmount` will be calculate wrong. 
+
+ 
+## Vulnerability Detail
+
+## Impact
+misCalculation of `getIsolatedColleteralValue()` so `cv` in `getPositionRisk`.This will lead some protocols can be 
+## Code Snippet
+https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/BlueBerryBank.sol#L493
+## Tool used
+
+Manual Review
+
+## Recommendation
+use underlying token's bToken exchangeRate in `getIsolatedColleteralValue()` not debtToken's.
+
+
+
+
+
+## Discussion
+
+**merteren1234**
+
+Escalate
+I think this issue is not duplicate of #16. Because this issue indicate differeant root cause than #16. This issue's root cause is , wrong bToken's exchangeRate used in getIsolatedColleteral().Not about old exchangeRate used or not. Moreover without fixing this issue , #16 is not valid because pos.debtToken is updated with poke modifier in liquidate function and its exchangeRate used in getIsolatedColleteralValue() .
+This issue is about getIsolatedColleteralValue() use debtToken's exchangeRate which is wrong because this functions should use underlyingToken's exchangeRate. So even though #16 is fixed  (there will be no impact without fix this issue.) this issue still remain and changing `ICErc20(banks[pos.debtToken].bToken).exchangeRateStored()` with `ICErc20(banks[pos.underlyingToken].bToken).exchangeRateStored()`   is mandatory to take correct getIsolatedColleteralValue().
+
+
+**sherlock-admin2**
+
+ > Escalate
+> I think this issue is not duplicate of #16. Because this issue indicate differeant root cause than #16. This issue's root cause is , wrong bToken's exchangeRate used in getIsolatedColleteral().Not about old exchangeRate used or not. Moreover without fixing this issue , #16 is not valid because pos.debtToken is updated with poke modifier in liquidate function and its exchangeRate used in getIsolatedColleteralValue() .
+> This issue is about getIsolatedColleteralValue() use debtToken's exchangeRate which is wrong because this functions should use underlyingToken's exchangeRate. So even though #16 is fixed  (there will be no impact without fix this issue.) this issue still remain and changing `ICErc20(banks[pos.debtToken].bToken).exchangeRateStored()` with `ICErc20(banks[pos.underlyingToken].bToken).exchangeRateStored()`   is mandatory to take correct getIsolatedColleteralValue().
+> 
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+Not a duplicate of #16 
+
+**hrishibhat**
+
+@Shogoki is this a valid issue on its own?
+
+**nevillehuang**
+
+> @Shogoki is this a valid issue on its own?
+
+@Gornutz 
+
+**hrishibhat**
+
+Result:
+High
+Unique
+After further review and discussions considering this a valid high issue as the exchange rate can be affected significantly by the tokens decimal and this is not a duplicate of #16 
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [merteren1234](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/117/#issuecomment-1693539478): accepted
 
 # Issue M-1: Users will fail to close their Convex position if the Curve pool is killed 
 
@@ -150,85 +713,7 @@ When killed, it is only possible for existing LPs to remove liquidity via remov
 
 
 
-# Issue M-2: getIsolatedCollateralValue() is not using the up-to-date exchange rate 
-
-Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/16 
-
-## Found by 
-Arz, BugBusters, Oxhunter526, RadCet, mert\_eren
-
-BlueBerryBank.sol:: getIsolatedCollateralValue() is using a wrong exchange rate which doesnt accrue interest before the value is returned so it will return not the most recent value. Because of that a user can get liquidated even if his position is still healthy.
-
-
-## Vulnerability Detail
-
-getIsolatedCollateralValue() is used in isLiquidatable() when calculating if a given position can be liquidated based on its risk ratio. This function computes the USD value of the isolated collateral for a given position.  
-
-However the problem is that interest is not accrued before the Compounds exchange rate is returned. The correct function to call is exchangeRateCurrent() which first accrues interest and then returns the stored exchange rate. 
-
-getIsolatedCollateralValue() is not a view function so exchangeRateCurrent() can and should be used here. 
-
-## Impact
-
-The user will be unable to call execute() where isLiquidatable() is used but more importantly he could get liquidated even if his position is still healthy
-
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/BlueBerryBank.sol#L482-L493
-
-```solidity
-482: /// @notice Ensure to call `accrue` beforehand to get the most recent value.
-483: /// @param positionId ID of the position to compute the isolated collateral value for.
-484: /// @return icollValue USD value of the isolated collateral.
-485: function getIsolatedCollateralValue(
-486:     uint256 positionId
-487: ) public override returns (uint256 icollValue) {
-488:     Position memory pos = positions[positionId];
-489:     /// NOTE: exchangeRateStored has 18 decimals.
-490:     uint256 underlyingAmount;
-491:     if (_isSoftVault(pos.underlyingToken)) {
-492:         underlyingAmount =
-493:             (ICErc20(banks[pos.debtToken].bToken).exchangeRateStored() *
-
-
-```
-
-As you can see exchangeRateStored() is used and the comment above says that accrue should be called but exchangeRateStored() does not accrue interest. This is not a view function so exchangeRateCurrent() should be used.
-
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-Use exchangeRateCurrent() so that interest is accrued before the exchange rate is returned.
-
-
-
-## Discussion
-
-**Gornutz**
-
-Previous contest item that was discussed thoroughly. See direct link - https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/97#issuecomment-1542716461 
-
-**Shogoki**
-
-> Previous contest item that was discussed thoroughly. See direct link - [sherlock-audit/2023-04-blueberry-judging#97 (comment)](https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/97#issuecomment-1542716461)
-
-Included this here as the reasoning in the mentioned item from the previous contest was:
-
-> Since we are using a view function we are unable to use exchangeRateCurrent() we have to use exchangeRateStored()
-
-However as we can see in the code and as the report states:
-
-> This is not a view function so exchangeRateCurrent() should be used.
-
-
-
-
-# Issue M-3: `getPrice` in `WeightedBPTOracle.sol`  uses `totalSupply` for price calculations which can lead to wrong results 
+# Issue M-2: `getPrice` in `WeightedBPTOracle.sol`  uses `totalSupply` for price calculations which can lead to wrong results 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/18 
 
@@ -267,75 +752,7 @@ Consider implementing the more recent `getActualSupply` even if older pools does
 
 
 
-# Issue M-4: Add Liquidity to Curve ETH pools will not work 
-
-Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/42 
-
-## Found by 
-0x52, 0xjoseph
-The Curve & Convex spell uses the Curve `add_liquidity` function to provide liquidity to curve pools.
-
-This will only work for non-ETH related Curve pools as ETH curve pools will require you to use the native version of ETH.
-
-## Vulnerability Detail
-The Curve `add_liquidity` function was written in a way which assumes that all Curve pools with the same number of tokens uses the same interface for providing liquidity, this is not the case.
-
-Here is how they differ:
-1. All ETH related pools are payable functions, which **expects** a msg.value when calling the `add_liquidity` function.
-
-Currently, the Curve & Convex Spell contract can only support non-ETH related pools with an interface like so:
-`function add_liquidity(uint256[2] calldata, uint256) external;`
-`function add_liquidity(uint256[3] calldata, uint256) external;`
- 
- But Curve ETH pools uses payable functions where the `msg.value` is **mandatory** like so:
-`function add_liquidity(uint256[3] calldata, uint256) external payable;`
-
-![image](https://github.com/sherlock-audit/2023-07-blueberry-JosephSaw/assets/28586597/385dd122-e476-4cdb-8d64-d564e9a7d997)
-
-Code snippet of the `add_liquidity` function inside the frxEth curve pool: https://etherscan.io/address/0xa1f8a6807c402e4a15ef4eba36528a3fed24e577#code
-    
-## Impact
-BlueBerry will not be able to support **any** Curve ETH LSD related tokens, as the `add_liquidity` function signature are incorrect due to the `payable` keyword.
-
-## Code Snippet
-- https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/ConvexSpell.sol#L120-L144
-- https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/CurveSpell.sol#L107-L140
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-There are 2 ways to fix this, the first is easier and more direct, the second method will require a bit of re-structuring to your code.
-
-Do note that this fix applies to **all** ETH related pools such as frxETH/ETH, stETH/ETH, ETH/USDT/BTC, etc
-
-**First Method:**
-i. Create a new mapping `isEthPool` (curveLpAddress -> true/false)
-ii. Before checking `if (tokens.length == 2)`, you add another check to see if the curve LP is an ETH pool from the mapping above
-iii. If it is, you can add liquidity using code like so: `CURVE_ETH_POOL.add_liquidity{value: amount}([amount, 0], 0);`
-
-**Second Method:**
-i. You can either create a mapping to save the function interface or pass it in as an argument.
-ii. Encode the data dynamically and call it like so
- `CURVE_ETH_POOL.call{value: amount}{(
-            abi.encodeWithSignature("add_liquidity(uint256[],uint256)", amounts, min_mint_amount)
-        );`
-
-
-
-## Discussion
-
-**sherlock-admin2**
-
-1 comment(s) were left on this issue during the judging contest.
-
-**0xyPhilic** commented:
-> invalid because this issue can be considered informational as the contest details do not suggest usage of native ETH pools
-
-
-
-# Issue M-5: ConvexSpell/CurveSpell.openPositionFarm will revert in some cases 
+# Issue M-3: ConvexSpell/CurveSpell.openPositionFarm will revert in some cases 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/60 
 
@@ -482,7 +899,126 @@ Two ways for fix it:
 
 
 
-# Issue M-6: AuraSpell#closePositionFarm exits pool with single token and without any slippage protection 
+# Issue M-4: Mainnet oracles are incompatible with wstETH causing many popular yields strategies to be broken 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/96 
+
+## Found by 
+0x52
+
+Mainnet oracles are incompatible with wstETH causing many popular yields strategies to be broken. Chainlink and Band do not have wstETH oracles and using Uniswap LP pairs would be very dangerous given their low liquidity. 
+
+## Vulnerability Detail
+
+[ChainlinkAdapterOracle.sol#L111-L125](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/oracle/ChainlinkAdapterOracle.sol#L111-L125)
+
+        uint256 decimals = registry.decimals(token, USD);
+        (
+            uint80 roundID,
+            int256 answer,
+            ,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = registry.latestRoundData(token, USD);
+        if (updatedAt < block.timestamp - maxDelayTime)
+            revert Errors.PRICE_OUTDATED(token_);
+        if (answer <= 0) revert Errors.PRICE_NEGATIVE(token_);
+        if (answeredInRound < roundID) revert Errors.PRICE_OUTDATED(token_);
+
+        return
+            (answer.toUint256() * Constants.PRICE_PRECISION) / 10 ** decimals;
+
+ChainlinkAdapterOracle only supports single asset price data. This makes it completely incompatible with wstETH because chainlink doesn't have a wstETH oracle on mainnet. Additionally Band protocol doesn't offer a wstETH oracle either. This only leaves Uniswap oracles which are highly dangerous given their low liquidity.
+
+## Impact
+
+Mainnet oracles are incompatible with wstETH causing many popular yields strategies to be broken
+
+## Code Snippet
+
+[ChainlinkAdapterOracle.sol#L102-L126](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/oracle/ChainlinkAdapterOracle.sol#L102-L126)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Create a special bypass specifically for wstETH utilizing the stETH oracle and it's current exchange rate. 
+
+
+
+## Discussion
+
+**sherlock-admin2**
+
+2 comment(s) were left on this issue during the judging contest.
+
+**0xyPhilic** commented:
+> invalid because this issue can be considered informational or at best low - tokens used are whitelisted
+
+**Kral01** commented:
+> low severity
+
+
+
+**IAm0x52**
+
+Escalate
+
+This was wrongly excluded. Protocol is meant to be compatible with these pools but can't work with them. I believe this is a valid medium because the protocol is nonfunctional in this area.
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This was wrongly excluded. Protocol is meant to be compatible with these pools but can't work with them. I believe this is a valid medium because the protocol is nonfunctional in this area.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+> Escalate
+> 
+> This was wrongly excluded. Protocol is meant to be compatible with these pools but can't work with them. I believe this is a valid medium because the protocol is nonfunctional in this area.
+
+Not sure were it says that the protcol is meant to be compatible with `WSTETH` pools on mainnet. 
+
+If that is the case it can be a valid issue, i guess. 
+However if it is not, i think the Whitelisting of tokens would count for invalidating it.
+
+**IAm0x52**
+
+Protocol is meant to be compatible with Aura/Convex. wstETH is a component of many highly attractive pools. Not being able to support wstETH as an underlying asset will break support for these.
+
+**hrishibhat**
+
+@Gornutz 
+
+**Gornutz**
+
+Confirm this is valid. 
+
+**hrishibhat**
+
+Result:
+Medium
+Unique
+Considering this issue a valid medium
+
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/96/#issuecomment-1694747143): accepted
+
+# Issue M-5: AuraSpell#closePositionFarm exits pool with single token and without any slippage protection 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/102 
 
@@ -539,7 +1075,63 @@ Manual Review
 
 Allow user to specify min amount received from exit
 
-# Issue M-7: AuraSpell#closePositionFarm will take reward fees on underlying tokens when borrow token is also a reward 
+
+
+## Discussion
+
+**securitygrid**
+
+Escalate:
+Historically, lacking slippage protection is H.
+
+
+**sherlock-admin2**
+
+ > Escalate:
+> Historically, lacking slippage protection is H.
+> 
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+> Escalate: Historically, lacking slippage protection is H.
+
+Can be a high issue
+
+**IAm0x52**
+
+Why would lack of slippage be considered high in this scenario? Even with zero slippage protection sandwich attack profitability is always contingent on a few external factors such as: liquidity of underlying pool, the fee of the underlying pool, the amount being swapped and the current gas prices. The higher the liquidity and fee of the pool the higher the cost to push the pool price then pull it back. The lower the amount being swapped, the less the attacker can steal. If this cost exceeds the gain from the attack then the attack isn't profitable and won't happen.
+
+**VagnerAndrei26**
+
+I think no slippage is considered high most of the time cause sandwich attacks are easily doable in the space, especially for those experienced in doing it, and even if there are factors to consider even one successful can occur loss of funds for the protocol in a pretty easy manner. So considering that and also past contests I think it should be considered also a high.
+
+**Nabeel-javaid**
+
+as far as I know 98% of the times slippage issues are considered as Medium severity
+
+**hrishibhat**
+
+Result:
+Medium
+Has duplicates 
+This is a valid medium issue. Agree with the Lead Watson's comments here:
+https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/102#issuecomment-1699649100
+
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [securitygrid](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/102/#issuecomment-1693593255): rejected
+
+# Issue M-6: AuraSpell#closePositionFarm will take reward fees on underlying tokens when borrow token is also a reward 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/103 
 
@@ -592,12 +1184,160 @@ Manual Review
 
 Use the same order as ConvexSpell and sell rewards BEFORE burning BLP
 
+# Issue M-7: Adversary can abuse hanging approvals left by PSwapLib.swap to bypass reward fees 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/104 
+
+## Found by 
+0x52
+
+PSwapLib.swap can be manipulated to leave hanging allowances via the expectedRewards input. These can then be abused to swap reward tokens out of order allowing them to bypass fees.
+
+## Vulnerability Detail
+
+[AuraSpell.sol#L247-L257](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/AuraSpell.sol#L247-L257)
+
+            _doCutRewardsFee(sellToken);
+            if (
+                expectedRewards[i] != 0 &&
+                !PSwapLib.swap(
+                    augustusSwapper,
+                    tokenTransferProxy,
+                    sellToken,
+                    expectedRewards[i],
+                    swapDatas[i]
+                )
+            ) revert Errors.SWAP_FAILED(sellToken);
+
+AuraSpell#closePositionFarm allows the user to specify any expectedRewards they wish. This allows the user to approve any amount, even if the amount is much larger than they would otherwise use. The can abuse these hanging approvals to swap tokens out of order and avoid paying reward fees.
+
+Example:
+Assume there are two rewards, token A and token B. Over time a user's position accumulates 100 rewards for each token. Normally the user would have to pay fees on those rewards. However they can bypass it by first creating hanging approvals. The user would start by redeeming a very small amount of LP and setting expectedRewards to uint256.max. They wouldn't sell the small amount leaving a very large approval left for both tokens. Now the user withdraws the rest of their position. This time they specify the swap data to swap token B first. The user still has to pay fees on token A but now they have traded token B before any fees can be taken on it. 
+
+## Impact
+
+User can bypass reward fees
+
+## Code Snippet
+
+[AuraSpell.sol#L184-L286](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/AuraSpell.sol#L184-L286)
+
+[ConvexSpell.sol#L179-L229](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/ConvexSpell.sol#L179-L229)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+After the swap reset allowances to 0
+
+
+
+## Discussion
+
+**sherlock-admin2**
+
+2 comment(s) were left on this issue during the judging contest.
+
+**0xyPhilic** commented:
+> invalid because fees are cut before the supplied check in _doCutFees function
+
+**Kral01** commented:
+> Not how approval works
+
+
+
+**IAm0x52**
+
+Escalate
+
+This was wrongly excluded. The judging comments above are incorrect. The code allows the user to make any swap in whatever order they want. This is what allows the user to bypass the fees. The user is meant to swap in the order that the tokens are listed but by swapping in a different order they can bypass the cut. Assume we have two tokens to claim. Normally the flow would be:
+
+RewardCut A > Swap A > RewardCut B > Swap B
+
+Using the methodology I've shown above the user can instead:
+
+RewardCut A > Swap B > RewardCutB > Swap A
+
+Here we see that B can be swapped before the reward cut allowing the fee to be bypassed.
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This was wrongly excluded. The judging comments above are incorrect. The code allows the user to make any swap in whatever order they want. This is what allows the user to bypass the fees. The user is meant to swap in the order that the tokens are listed but by swapping in a different order they can bypass the cut. Assume we have two tokens to claim. Normally the flow would be:
+> 
+> RewardCut A > Swap A > RewardCut B > Swap B
+> 
+> Using the methodology I've shown above the user can instead:
+> 
+> RewardCut A > Swap B > RewardCutB > Swap A
+> 
+> Here we see that B can be swapped before the reward cut allowing the fee to be bypassed.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+> Escalate
+> 
+> This was wrongly excluded. The judging comments above are incorrect. The code allows the user to make any swap in whatever order they want. This is what allows the user to bypass the fees. The user is meant to swap in the order that the tokens are listed but by swapping in a different order they can bypass the cut. Assume we have two tokens to claim. Normally the flow would be:
+> 
+> RewardCut A > Swap A > RewardCut B > Swap B
+> 
+> Using the methodology I've shown above the user can instead:
+> 
+> RewardCut A > Swap B > RewardCutB > Swap A
+> 
+> Here we see that B can be swapped before the reward cut allowing the fee to be bypassed.
+
+Agree with escalation. As the user can specify any `expectedRewards` and any `callData` in any order, this is a valid attack vector.
+
+**hrishibhat**
+
+@Gornutz 
+
+**Gornutz**
+
+The paraswap lib is already resetting the token approval to zero prior to allocating the allowance for each swap - https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/libraries/Paraswap/PSwapLib.sol#L15 
+
+
+**Shogoki**
+
+> The paraswap lib is already resetting the token approval to zero prior to allocating the allowance for each swap - https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/libraries/Paraswap/PSwapLib.sol#L15
+
+I do not think this helps preventing this issue. As the approval is resetted before the swap, there still can be a hanging approval.
+Issue is that the approval is set/reset for the specified sellToken, but the user can swap any other token by specifying different calldatas. Therefore, i think the stated attack path is still possible
+
+**Gornutz**
+
+Gotcha, then yes seems valid 
+
+**hrishibhat**
+
+Result:
+Medium
+Unique
+This is a valid medium issue
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/104/#issuecomment-1694746004): accepted
+
 # Issue M-8: ConvexSpell is completely broken for any curve LP that utilizes native ETH 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/105 
 
 ## Found by 
-0x52, Vagner
+0x52, 0xjoseph
 
 When a Curve pool utilizes native ETH it uses the address `0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee`. This is problematic because it will try to call balanceOf on this address which will always revert.
 
@@ -645,7 +1385,241 @@ I would recommend conversion between native ETH and wETH to prevent this issue.
 
 
 
-# Issue M-9: WConvexPool.sol will be broken on Arbitrum due to improper integration with Convex Arbitrum contracts 
+# Issue M-9: Issue #47 from Update #1 is still present in ConvexSpell 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/106 
+
+## Found by 
+0x52
+
+Issue [47](https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/47) from update contest 1 was only fixed for CurveSpell but wasn't fixed for ConvexSpell.
+
+## Vulnerability Detail
+
+See issue [47](https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/47)
+
+## Impact
+
+See issue [47](https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/47)
+
+## Code Snippet
+
+[ConvexSpell.sol#L92-L173](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/ConvexSpell.sol#L92-L173)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+See issue [47](https://github.com/sherlock-audit/2023-04-blueberry-judging/issues/47)
+
+
+
+
+## Discussion
+
+**sherlock-admin2**
+
+1 comment(s) were left on this issue during the judging contest.
+
+**darkart** commented:
+>  Its up to Devs if they wanna fix it
+
+
+
+**IAm0x52**
+
+Escalate
+
+This is a completely different issue than #42. This was the same issue from the previous contest. They dev simply missed the occurrence in convex spell. This is a valid med and needs to be fixed.
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This is a completely different issue than #42. This was the same issue from the previous contest. They dev simply missed the occurrence in convex spell. This is a valid med and needs to be fixed.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+> Escalate
+> 
+> This is a completely different issue than #42. This was the same issue from the previous contest. They dev simply missed the occurrence in convex spell. This is a valid med and needs to be fixed.
+
+Agree, not a duplicate #42. This is an issue from the previous contest that was fixed, but is here found at a different place. Can be a valid finding on its own.
+
+**IAm0x52**
+
+Missed that this should be a dupe of #60 
+
+**hrishibhat**
+
+Result:
+Medium
+Unique
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/106/#issuecomment-1694745204): accepted
+
+**hrishibhat**
+
+Considering this issue a valid issue on its own. #60 talks of the fix that was implemented in the previous contest, while this issue points to the original underlying issue that still existed in one of the contracts. 
+This is a unique situation, hence both the issues are treated separately 
+
+# Issue M-10: WAuraPools doesn't correctly account for AuraStash causing all deposits to be permanently lost 
+
+Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/108 
+
+## Found by 
+0x52
+
+Some Aura pools have two sources of AURA. First from the booster but also as a secondary reward. This secondary reward is stash AURA that doesn't behave like regular AURA. Although properly accounted for in AuraSpell, it is not properly accounted for in WAuraPools, resulting in all deposits being unrecoverable. 
+
+## Vulnerability Detail
+
+[WAuraPools.sol#L413-L418](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/wrapper/WAuraPools.sol#L413-L418)
+
+        uint256 rewardTokensLength = rewardTokens.length;
+        for (uint256 i; i != rewardTokensLength; ) {
+            IERC20Upgradeable(rewardTokens[i]).safeTransfer(
+                msg.sender,
+                rewards[i]
+            );
+
+When burning the wrapped LP token, it attempts to transfer each token to msg.sender. The problem is that stash AURA cannot be transferred like an regular ERC20 token and any transfers will revert. Since this will be called on every attempted withdraw, all deposits will be permanently unrecoverable.
+
+## Impact
+
+All deposits will be permanently unrecoverable
+
+## Code Snippet
+
+[WAuraPools.sol#L360-L424](https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/wrapper/WAuraPools.sol#L360-L424)
+
+## Tool used
+
+Manual Review
+
+## Recommendation
+
+Check if reward is stash AURA and send regular AURA instead similar to what is done in AuraSpell.
+
+
+
+## Discussion
+
+**sherlock-admin2**
+
+1 comment(s) were left on this issue during the judging contest.
+
+**Kral01** commented:
+> Needs PoC
+
+
+
+**IAm0x52**
+
+Escalate
+
+This was incorrectly excluded. 
+
+https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/spell/AuraSpell.sol#L243-L257
+
+        for (uint256 i; i != rewardTokensLength; ) {
+            address sellToken = rewardTokens[i];
+            if (sellToken == STASH_AURA) sellToken = AURA;
+
+            _doCutRewardsFee(sellToken);
+            if (
+                expectedRewards[i] != 0 &&
+                !PSwapLib.swap(
+                    augustusSwapper,
+                    tokenTransferProxy,
+                    sellToken,
+                    expectedRewards[i],
+                    swapDatas[i]
+                )
+            ) revert Errors.SWAP_FAILED(sellToken);
+
+            /// Refund rest (dust) amount to owner
+            _doRefund(sellToken);
+
+            unchecked {
+                ++i;
+            }
+
+AuraSpell requires the above code to prevent this. WAuraPools uses the exact same reward list and needs the same protections. The result is that funds will be permanently trapped, because the transfer will always fail.
+
+**sherlock-admin2**
+
+ > Escalate
+> 
+> This was incorrectly excluded. 
+> 
+> https://github.com/sherlock-audit/2023-07-blueberry/blob/7c7e1c4a8f3012d1afd2e598b656010bb9127836/blueberry-core/contracts/spell/AuraSpell.sol#L243-L257
+> 
+>         for (uint256 i; i != rewardTokensLength; ) {
+>             address sellToken = rewardTokens[i];
+>             if (sellToken == STASH_AURA) sellToken = AURA;
+> 
+>             _doCutRewardsFee(sellToken);
+>             if (
+>                 expectedRewards[i] != 0 &&
+>                 !PSwapLib.swap(
+>                     augustusSwapper,
+>                     tokenTransferProxy,
+>                     sellToken,
+>                     expectedRewards[i],
+>                     swapDatas[i]
+>                 )
+>             ) revert Errors.SWAP_FAILED(sellToken);
+> 
+>             /// Refund rest (dust) amount to owner
+>             _doRefund(sellToken);
+> 
+>             unchecked {
+>                 ++i;
+>             }
+> 
+> AuraSpell requires the above code to prevent this. WAuraPools uses the exact same reward list and needs the same protections. The result is that funds will be permanently trapped, because the transfer will always fail.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+Seems valid
+STASH AURA seems to be a valid `extraRewardToken` but transfer can only be called from the pool, which will actually transfer AURA instead. 
+So if the WAURAPool tries to call transfer it will revert.
+
+**hrishibhat**
+
+Result:
+Medium
+Unique 
+Considering this issue a valid medium
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [IAm0x52](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/108/#issuecomment-1694744574): accepted
+
+# Issue M-11: WConvexPool.sol will be broken on Arbitrum due to improper integration with Convex Arbitrum contracts 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/119 
 
@@ -674,67 +1648,7 @@ Manual Review
 ## Recommendation
 Consider creating a separate contract for WConvexPools for Arbitrum that correctly accounts for the Convex Booster implementation changes.
 
-# Issue M-10: Potential for user positions to fall below `minPositionSize` when partially closing or reducing positions 
-
-Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/122 
-
-## Found by 
-bitsurfer, chainNue
-
-`_validatePosSize` didn't check on withdrawal or closePositionFarm when user decrease or partial close their position can make user's position under `minPositionSize`
-
-## Vulnerability Detail
-
-This current Blueberry update introduce a `minPositionSize` on its Strategy, (before it only have `maxPositionSize`).
-
-```js
-File: BasicSpell.sol
-39:     /// @dev Defines strategies for Blueberry Protocol.
-40:     /// @param vault Address of the vault where assets are held.
-41:     /// @param minPositionSize Minimum size of the position in USD.
-42:     /// @param maxPositionSize Maximum size of the position in USD.
-43:     struct Strategy {
-44:         address vault;
-45:         uint256 minPositionSize;
-46:         uint256 maxPositionSize;
-47:     }
-```
-
-In current codebase, the function `_validatePosSize` only invoked during the processes of `deposit` or `openPositionFarm`. However, with the addition of the `minPositionSize`, the verification for position size needs to be extended to include the `withdrawal` process or `closePositionFarm` operation as well. This ensures that the position size remains within acceptable boundaries, avoiding falling below the minimum threshold.
-
-```js
-File: BasicSpell.sol
-273:     function _validatePosSize(uint256 strategyId) internal {
-...
-295:         // Check if position size is within bounds
-296:         if (prevPosSize + addedPosSize > strategy.maxPositionSize)
-297:             revert Errors.EXCEED_MAX_POS_SIZE(strategyId);
-298:         if (prevPosSize + addedPosSize < strategy.minPositionSize)
-299:             revert Errors.EXCEED_MIN_POS_SIZE(strategyId);
-300:     }
-```
-
-If the user decrease their position or partial close, they can be in position where their position is under the `minPositionSize` (either it was purposely or unknowingly).
-
-The Blueberry protocol introduce the minPositionSize for any reasons. By imposing a minimum position size, the protocol might aims to balance between resource utilization, risk mitigation, and user engagement. The update extends the position size validation to withdrawal and position closure processes to ensure that positions remain within acceptable boundaries, preventing them from becoming too small to be meaningful within the protocol's operations.
-
-## Impact
-
-User's position might be under minimum size position when they decrease their position or partial `closePositionFarm` which is not expected by the protocol
-
-## Code Snippet
-
-https://github.com/sherlock-audit/2023-07-blueberry/blob/main/blueberry-core/contracts/spell/BasicSpell.sol#L298-L299
-
-## Tool used
-
-Manual Review
-
-## Recommendation
-
-`minPositionSize` should be checked on `closePositionFarm` or withdrawal when decreasing position or partial closing by calling `_validatePosSize` 
-
-# Issue M-11: AuraSpell `openPositionFarm` will revert when the tokens contains `lpToken` 
+# Issue M-12: AuraSpell `openPositionFarm` will revert when the tokens contains `lpToken` 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/125 
 
@@ -857,7 +1771,7 @@ Manual Review
 
 Remove the assembly code where it will decrease the `amountsIn` length when `isLPIncluded` is true to make sure the array length are same.
 
-# Issue M-12: approve() call with incorrect function signature will make any SoftVault deployed with USDT as the underlying token unusable 
+# Issue M-13: approve() call with incorrect function signature will make any SoftVault deployed with USDT as the underlying token unusable 
 
 Source: https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/135 
 
@@ -917,4 +1831,208 @@ Actually i do not understand why the issue was closed in the last contest with t
 `USDT only can call approve function when the allowance is zero or to set the allowance to zero first.`
 
 This is not related to the stated issue, that the approval will revert because the generic IERC20 interface is used, which is expecting a bool return data.
+
+**nevillehuang**
+
+Escalate:
+
+Referring to @Gornutz comment, this was marked as No-Fix and Non-Reward in previous contest, and should be invalid according to sherlock's [rules here](https://docs.sherlock.xyz/audits/judging/judging):
+
+> In an update contest, issues from the previous contest with wont fix labels are not considered valid.
+
+In addition, `EnsureApprove.sol` uses `_ensureApprove()` directly to approve tokens  (for e.g. USDT) for contracts inheriting it, so the issue above of needing an interface is not a problem.
+
+**sherlock-admin2**
+
+ > Escalate:
+> 
+> Referring to @Gornutz comment, this was marked as No-Fix and Non-Reward in previous contest, and should be invalid according to sherlock's [rules here](https://docs.sherlock.xyz/audits/judging/judging):
+> 
+> > In an update contest, issues from the previous contest with wont fix labels are not considered valid.
+> 
+> In addition, `EnsureApprove.sol` uses `_ensureApprove()` directly to approve tokens  (for e.g. USDT) for contracts inheriting it, so the issue above of needing an interface is not a problem.
+
+You've created a valid escalation!
+
+To remove the escalation from consideration: Delete your comment.
+
+You may delete or edit your escalation comment anytime before the 48-hour escalation window closes. After that, the escalation becomes final.
+
+**Shogoki**
+
+> Escalate:
+> 
+> Referring to @Gornutz comment, this was marked as No-Fix and Non-Reward in previous contest, and should be invalid according to sherlock's [rules here](https://docs.sherlock.xyz/audits/judging/judging):
+> 
+> > In an update contest, issues from the previous contest with wont fix labels are not considered valid.
+> 
+
+Hmm, yep that is kind of an interesting case. I agree, that it is probably fair in terms of rewards to consider this invalid.
+However as stated in my comment above, i do not understand the reasoning for closing this in the initial contest.
+
+**securitygrid**
+
+The function signature only needs the function name and parameters, and does not need a return value.
+
+**Shogoki**
+
+> The function signature only needs the function name and parameters, and does not need a return value.
+
+While this is true for the call, it is still a problem as the transaction will revert because Solidity checks for the expected return size and compares it to the actual returned data size. 
+
+
+**nevillehuang**
+
+> > The function signature only needs the function name and parameters, and does not need a return value.
+> 
+> While this is true for the call, it is still a problem as the transaction will revert because Solidity checks for the expected return size and compares it to the actual returned data size.
+
+As @securitygrid said, there will be no reverts, given allowance is approved to zero first. The interface only requires the function selector to match and call the function in the USDT contract [check this link here](https://medium.com/coinmonks/function-selectors-in-solidity-understanding-and-working-with-them-25e07755e976#:~:text=The%20function%20signature%20is%20derived,myFunction(address%2Cuint256)%20.)
+
+> When a contract is called, the EVM (Ethereum Virtual Machine) reads the first four bytes of the provided data to determine the function selector. The EVM uses this selector to match it with the correct function within the contract. If a match is found, the function is executed. If no match is found, the function call fails.
+
+For example, function signature of `approve()` here would be `bytes4(keccak256("approve(address,uint)"));`
+
+Unless there are two approve functions with different number of arguments, this submission seems like only a valid QA/low finding since there is only 1 approve function exposed in USDT contract
+
+**securitygrid**
+
+@nevillehuang 
+This problem should be considered from the compiled code:
+The compiled code of `IERC20(token).approve(spender, 0)` is similar to the following:
+```solidity
+(bool ret, bytes data) = token.call(abi.encodeWithSignature("approve(address,uint256)", spender, 0);
+if (ret) {
+     if (data.length != 1) // since usdt.approve has no return value, so data.length = 0
+     {
+            revert;
+     }
+     return abi.decode(data, (bool));
+} else {
+     revert;
+}
+```
+
+
+**Shogoki**
+
+> @nevillehuang This problem should be considered from the compiled code: The compiled code of `IERC20(token).approve(spender, 0)` is similar to the following:
+> 
+> ```solidity
+> (bool ret, bytes data) = token.call(abi.encodeWithSignature("approve(address,uint256)", spender, 0);
+> if (ret) {
+>      if (data.length != 1) // since usdt.approve has no return vault, so data.length = 0
+>      {
+>             revert;
+>      }
+>      return abi.decode(data, (bool));
+> } else {
+>      revert;
+> }
+> ```
+
+That is correct. 
+
+To demonstrate the issue we can use the following litle PoC.
+
+1. Creating a Contract `EnsureApproveTest.sol` 
+
+```solidity
+// SPDX-License-Identifier: MIT
+
+pragma solidity 0.8.16;
+
+import {EnsureApprove} from "./utils/EnsureApprove.sol" ;
+
+contract EnsureApproveTest is EnsureApprove {
+
+    function approveMe(address token, uint256 amount) external {
+        _ensureApprove(token, msg.sender, amount);
+    }
+}
+```
+
+2. Creating a Test `ensureApprove.ts` 
+
+```typescript
+import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
+import { ethers, upgrades } from "hardhat";
+import chai, { expect } from "chai";
+import { EnsureApproveTest, IERC20 } from "../typechain-types";
+import { roughlyNear } from "./assertions/roughlyNear";
+import { near } from "./assertions/near";
+import { Contract } from "ethers";
+
+chai.use(roughlyNear);
+chai.use(near);
+
+const USDT_ADDRESS = "0xdac17f958d2ee523a2206206994597c13d831ec7";
+const USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
+
+describe("Ensure Approve", () => {
+  let admin: SignerWithAddress;
+  let alice: SignerWithAddress;
+  let testContract: EnsureApproveTest;
+  let usdt: Contract;
+  let usdc: Contract;
+
+  before(async () => {
+    [admin, alice] = await ethers.getSigners();
+  });
+
+  beforeEach(async () => {
+    const EnsureApproveTest = await ethers.getContractFactory("EnsureApproveTest");
+    testContract = await EnsureApproveTest.deploy();
+    usdt = await   ethers.getContractAt("@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20", USDT_ADDRESS);
+    usdc = await   ethers.getContractAt("@openzeppelin/contracts/token/ERC20/IERC20.sol:IERC20", USDC_ADDRESS);
+  });
+  describe("IERC20 Interface", () => {
+    it("TEST USDC APPROVAL", async () => {
+        const approvalBefore = await usdc.allowance(testContract.address, alice.address);
+        console.log("Allowance Before", approvalBefore);
+        await testContract.connect(alice).approveMe(usdc.address, 1000);
+        const approvalAfter = await usdc.allowance(testContract.address, alice.address);
+        console.log("Allowance After", approvalAfter);
+       expect(approvalAfter).to.equal(1000);
+    });
+    
+    it("TEST USDT APPROVAL", async () => {
+        const approvalBefore = await usdt.allowance(testContract.address, alice.address);
+        console.log("Allowance Before", approvalBefore);
+        await testContract.connect(alice).approveMe(usdt.address, 1000);
+        const approvalAfter = await usdt.allowance(testContract.address, alice.address);
+        console.log("Allowance After", approvalAfter);
+        expect(approvalAfter).to.equal(1000);
+    });
+    
+});
+
+});
+```
+
+Running this will result in the 2nd test to fail, because of the mismatching return data length
+
+```
+1 failing
+
+  1) Ensure Approve
+       IERC20 Interface
+         TEST USDT APPROVAL:
+     Error: Transaction reverted: function returned an unexpected amount of data
+```
+
+**hrishibhat**
+
+Result:
+Medium
+Has duplicates
+Considering this a value medium issue based on the discussions above, this was a valid issue that was not acknowledged in the previous contests, but now with additional information is considered a valid medium. 
+I agree the `Wont fix` rule might need to be more clear of the conditions to which they are applied
+
+**sherlock-admin2**
+
+Escalations have been resolved successfully!
+
+Escalation status:
+- [nevillehuang](https://github.com/sherlock-audit/2023-07-blueberry-judging/issues/135/#issuecomment-1693509481): accepted
 
